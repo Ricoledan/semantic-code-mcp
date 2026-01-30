@@ -30,9 +30,9 @@ Semantic search finds code by meaning, not text. Using local embeddings and vect
 ## Installation
 
 ```bash
-npm install semantic-code-mcp
+npm install @smallthinkingmachines/semantic-code-mcp
 # or
-yarn add semantic-code-mcp
+yarn add @smallthinkingmachines/semantic-code-mcp
 ```
 
 ## Usage with Claude Code
@@ -44,7 +44,7 @@ Add to your Claude Code MCP configuration (`~/.claude/claude_desktop_config.json
   "mcpServers": {
     "semantic-code": {
       "command": "npx",
-      "args": ["semantic-code-mcp"]
+      "args": ["@smallthinkingmachines/semantic-code-mcp"]
     }
   }
 }
@@ -57,7 +57,7 @@ The server automatically uses your current working directory. To specify a diffe
   "mcpServers": {
     "semantic-code": {
       "command": "npx",
-      "args": ["semantic-code-mcp", "/path/to/project"]
+      "args": ["@smallthinkingmachines/semantic-code-mcp", "/path/to/project"]
     }
   }
 }
@@ -69,13 +69,13 @@ The server uses stdio transport. Start it with:
 
 ```bash
 # Uses current directory
-npx semantic-code-mcp
+npx @smallthinkingmachines/semantic-code-mcp
 
 # Or specify a directory
-npx semantic-code-mcp /path/to/project
+npx @smallthinkingmachines/semantic-code-mcp /path/to/project
 
 # Or use environment variable
-SEMANTIC_CODE_ROOT=/path/to/project npx semantic-code-mcp
+SEMANTIC_CODE_ROOT=/path/to/project npx @smallthinkingmachines/semantic-code-mcp
 ```
 
 ## Tool: semantic_search

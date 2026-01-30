@@ -1,5 +1,5 @@
 {
-  "name": "semantic-code-mcp",
+  "name": "@smallthinkingmachines/semantic-code-mcp",
   "version": "0.2.0",
   "description": "MCP server for semantic code search using AST-aware chunking and vector embeddings",
   "type": "module",
@@ -7,13 +7,27 @@
   "bin": {
     "semantic-code-mcp": "./dist/index.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smallthinkingmachines/semantic-code-mcp.git"
+  },
+  "homepage": "https://github.com/smallthinkingmachines/semantic-code-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/smallthinkingmachines/semantic-code-mcp/issues"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "lint": "eslint src/",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build && npm run test"
   },
   "keywords": [
     "semantic-search",
