@@ -53,52 +53,48 @@ async function loadLanguage(lang: string): Promise<unknown> {
   let languageModule: TreeSitterLanguageModule;
 
   try {
+    let language: unknown;
+
     switch (lang) {
-      case 'typescript':
-        languageModule = (await import(
-          'tree-sitter-typescript'
-        )) as TreeSitterLanguageModule;
-        // tree-sitter-typescript exports { typescript, tsx }
-        const tsModule = languageModule as { typescript: unknown; tsx: unknown };
-        languageCache.set('typescript', tsModule.typescript);
-        languageCache.set('tsx', tsModule.tsx);
-        return tsModule.typescript;
-      case 'tsx':
-        languageModule = (await import(
-          'tree-sitter-typescript'
-        )) as TreeSitterLanguageModule;
-        const tsxModule = languageModule as {
-          typescript: unknown;
-          tsx: unknown;
-        };
-        languageCache.set('typescript', tsxModule.typescript);
-        languageCache.set('tsx', tsxModule.tsx);
-        return tsxModule.tsx;
-      case 'javascript':
-        languageModule = (await import(
-          'tree-sitter-javascript'
-        )) as TreeSitterLanguageModule;
+      case 'typescript': {
+        const tsModule = await import('tree-sitter-typescript');
+        // ESM wraps in default, tree-sitter-typescript exports { typescript, tsx }
+        const ts = tsModule.default ?? tsModule;
+        languageCache.set('typescript', ts.typescript);
+        languageCache.set('tsx', ts.tsx);
+        return ts.typescript;
+      }
+      case 'tsx': {
+        const tsModule = await import('tree-sitter-typescript');
+        const ts = tsModule.default ?? tsModule;
+        languageCache.set('typescript', ts.typescript);
+        languageCache.set('tsx', ts.tsx);
+        return ts.tsx;
+      }
+      case 'javascript': {
+        const jsModule = await import('tree-sitter-javascript');
+        language = jsModule.default ?? jsModule;
         break;
-      case 'python':
-        languageModule = (await import(
-          'tree-sitter-python'
-        )) as TreeSitterLanguageModule;
+      }
+      case 'python': {
+        const pyModule = await import('tree-sitter-python');
+        language = pyModule.default ?? pyModule;
         break;
-      case 'go':
-        languageModule = (await import(
-          'tree-sitter-go'
-        )) as TreeSitterLanguageModule;
+      }
+      case 'go': {
+        const goModule = await import('tree-sitter-go');
+        language = goModule.default ?? goModule;
         break;
-      case 'rust':
-        languageModule = (await import(
-          'tree-sitter-rust'
-        )) as TreeSitterLanguageModule;
+      }
+      case 'rust': {
+        const rustModule = await import('tree-sitter-rust');
+        language = rustModule.default ?? rustModule;
         break;
+      }
       default:
         throw new Error(`Unsupported language: ${lang}`);
     }
 
-    const language = languageModule.default ?? languageModule;
     languageCache.set(lang, language);
     return language;
   } catch (error) {
@@ -310,7 +306,8 @@ export async function chunkCode(
   try {
     const language = await loadLanguage(lang);
     const parser = new Parser();
-    parser.setLanguage(language as Parser.Language);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    parser.setLanguage(language as any);
 
     const tree = parser.parse(sourceCode);
     const chunks: CodeChunk[] = [];

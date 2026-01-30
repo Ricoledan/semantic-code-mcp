@@ -155,7 +155,3 @@ semantic-code-mcp/
 ├── tsconfig.json
 └── README.md
 ```
-
-## License
-
-MIT
