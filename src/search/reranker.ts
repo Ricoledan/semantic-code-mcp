@@ -96,6 +96,9 @@ export async function rerank(
   try {
     const pipe = await getRerankerPipeline(model, dtype, onProgress);
 
+    // Track error count for reporting
+    let errorCount = 0;
+
     // Score each result against the query
     const scoredResults = await Promise.all(
       results.map(async (result) => {
@@ -112,12 +115,18 @@ export async function rerank(
             ...result,
             score: relevanceScore,
           };
-        } catch {
-          // On error, keep original score
+        } catch (error) {
+          // On error, keep original score and increment error count
+          errorCount++;
           return result;
         }
       })
     );
+
+    // Report error count if any failures occurred
+    if (errorCount > 0) {
+      onProgress?.(`Reranking completed with ${errorCount} errors (kept original scores)`);
+    }
 
     // Sort by reranked score and return top K
     return scoredResults

@@ -4,6 +4,7 @@
  */
 
 import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers';
+import { ModelLoadError, EmbeddingGenerationError } from '../errors.js';
 
 // Configure transformers.js to use local cache
 env.cacheDir = process.env.HOME
@@ -79,11 +80,32 @@ async function getEmbeddingPipeline(
       return pipe;
     } catch (error) {
       loadingPromise = null;
-      throw new Error(`Failed to load embedding model: ${error}`);
+      const message = error instanceof Error ? error.message : String(error);
+      throw new ModelLoadError(
+        `Failed to load embedding model "${model}": ${message}`,
+        error instanceof Error ? error : undefined
+      );
     }
   })();
 
   return loadingPromise;
+}
+
+/**
+ * Validate that an embedding is valid (non-empty, finite values)
+ */
+function validateEmbedding(embedding: number[]): void {
+  if (embedding.length === 0) {
+    throw new EmbeddingGenerationError('Embedding is empty');
+  }
+  for (let i = 0; i < embedding.length; i++) {
+    const val = embedding[i];
+    if (val === undefined || !Number.isFinite(val)) {
+      throw new EmbeddingGenerationError(
+        `Embedding contains invalid value at index ${i}: ${val}`
+      );
+    }
+  }
 }
 
 /**
@@ -100,7 +122,19 @@ export async function embed(
     onProgress,
   } = options;
 
-  const pipe = await getEmbeddingPipeline(model, dtype, onProgress);
+  let pipe: FeatureExtractionPipeline;
+  try {
+    pipe = await getEmbeddingPipeline(model, dtype, onProgress);
+  } catch (error) {
+    if (error instanceof ModelLoadError) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ModelLoadError(
+      `Failed to load embedding model: ${message}`,
+      error instanceof Error ? error : undefined
+    );
+  }
 
   // Truncate text if too long (rough estimate: 1 token ≈ 4 chars)
   const maxChars = maxTokens * 4;
@@ -109,18 +143,32 @@ export async function embed(
   // Add search_document prefix for better retrieval (nomic model recommendation)
   const prefixedText = `search_document: ${truncatedText}`;
 
-  const output = await pipe(prefixedText, {
-    pooling: 'mean',
-    normalize: true,
-  });
+  try {
+    const output = await pipe(prefixedText, {
+      pooling: 'mean',
+      normalize: true,
+    });
 
-  // Extract the embedding array from the tensor
-  const embedding = Array.from(output.data as Float32Array);
+    // Extract the embedding array from the tensor
+    const embedding = Array.from(output.data as Float32Array);
 
-  return {
-    embedding,
-    tokenCount: Math.ceil(truncatedText.length / 4),
-  };
+    // Validate the embedding
+    validateEmbedding(embedding);
+
+    return {
+      embedding,
+      tokenCount: Math.ceil(truncatedText.length / 4),
+    };
+  } catch (error) {
+    if (error instanceof EmbeddingGenerationError) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new EmbeddingGenerationError(
+      `Failed to generate embedding: ${message}`,
+      error instanceof Error ? error : undefined
+    );
+  }
 }
 
 /**
@@ -132,22 +180,48 @@ export async function embedQuery(
 ): Promise<EmbeddingResult> {
   const { model = DEFAULT_MODEL, dtype = DEFAULT_DTYPE, onProgress } = options;
 
-  const pipe = await getEmbeddingPipeline(model, dtype, onProgress);
+  let pipe: FeatureExtractionPipeline;
+  try {
+    pipe = await getEmbeddingPipeline(model, dtype, onProgress);
+  } catch (error) {
+    if (error instanceof ModelLoadError) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ModelLoadError(
+      `Failed to load embedding model: ${message}`,
+      error instanceof Error ? error : undefined
+    );
+  }
 
   // Add search_query prefix for queries (nomic model recommendation)
   const prefixedQuery = `search_query: ${query}`;
 
-  const output = await pipe(prefixedQuery, {
-    pooling: 'mean',
-    normalize: true,
-  });
+  try {
+    const output = await pipe(prefixedQuery, {
+      pooling: 'mean',
+      normalize: true,
+    });
 
-  const embedding = Array.from(output.data as Float32Array);
+    const embedding = Array.from(output.data as Float32Array);
 
-  return {
-    embedding,
-    tokenCount: Math.ceil(query.length / 4),
-  };
+    // Validate the embedding
+    validateEmbedding(embedding);
+
+    return {
+      embedding,
+      tokenCount: Math.ceil(query.length / 4),
+    };
+  } catch (error) {
+    if (error instanceof EmbeddingGenerationError) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    throw new EmbeddingGenerationError(
+      `Failed to generate query embedding: ${message}`,
+      error instanceof Error ? error : undefined
+    );
+  }
 }
 
 /**

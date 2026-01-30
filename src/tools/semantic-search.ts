@@ -8,6 +8,31 @@ import * as path from 'path';
 import { VectorStore } from '../store/index.js';
 import { hybridSearch, formatSearchResults, type HybridSearchResult } from '../search/index.js';
 import { indexDirectory, FileWatcher } from '../watcher/index.js';
+import { PathTraversalError } from '../errors.js';
+
+/**
+ * Check if a path is within the allowed root directory.
+ * Prevents path traversal attacks (e.g., ../../../etc/passwd).
+ */
+function isPathWithinRoot(testPath: string, rootDir: string): boolean {
+  const resolvedPath = path.resolve(rootDir, testPath);
+  const resolvedRoot = path.resolve(rootDir);
+
+  // Ensure the resolved path starts with the root directory
+  return resolvedPath.startsWith(resolvedRoot + path.sep) || resolvedPath === resolvedRoot;
+}
+
+/**
+ * Validate that a search path is safe and within the root directory.
+ * Throws PathTraversalError if the path attempts to escape the root.
+ */
+function validateSearchPath(searchPath: string, rootDir: string): void {
+  if (!isPathWithinRoot(searchPath, rootDir)) {
+    throw new PathTraversalError(
+      `Path traversal detected: "${searchPath}" is outside the allowed root directory`
+    );
+  }
+}
 
 /**
  * Zod schema for semantic_search tool input
@@ -170,6 +195,9 @@ On first use, indexes the codebase (may take a moment for large projects).`,
       searchPath = path.isAbsolute(validated.path)
         ? validated.path
         : path.join(this.rootDir, validated.path);
+
+      // Validate that the path is within the root directory
+      validateSearchPath(searchPath, this.rootDir);
     }
 
     // Perform hybrid search

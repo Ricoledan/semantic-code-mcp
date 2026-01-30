@@ -6,6 +6,30 @@
 import * as lancedb from '@lancedb/lancedb';
 import * as fs from 'fs';
 import type { CodeChunk } from '../chunker/index.js';
+import { InvalidIdError } from '../errors.js';
+
+/**
+ * Validate that an ID matches the expected format.
+ * IDs should be safe alphanumeric strings with underscores.
+ * Format: path_to_file_ts_L123 or similar
+ */
+const VALID_ID_PATTERN = /^[a-zA-Z0-9_\-]+$/;
+const MAX_ID_LENGTH = 500;
+
+function validateId(id: string): void {
+  if (id.length > MAX_ID_LENGTH) {
+    throw new InvalidIdError(`ID too long: ${id.length} characters (max ${MAX_ID_LENGTH})`);
+  }
+  if (!VALID_ID_PATTERN.test(id)) {
+    throw new InvalidIdError(`Invalid ID format: contains disallowed characters`);
+  }
+}
+
+function validateIds(ids: string[]): void {
+  for (const id of ids) {
+    validateId(id);
+  }
+}
 
 export interface VectorRecord {
   /** Unique chunk ID */
@@ -158,6 +182,8 @@ export class VectorStore {
     } else {
       // For upsert, delete existing records with same IDs first
       const ids = records.map((r) => r.id);
+      // Validate all IDs before constructing the SQL query
+      validateIds(ids);
       try {
         await this.table.delete(`id IN ('${ids.join("','")}')`);
       } catch {

@@ -5,6 +5,8 @@
 import type { VectorStore, SearchResult } from '../store/index.js';
 import { embedQuery } from '../embedder/index.js';
 import { rerank, boostKeywordMatches } from './reranker.js';
+import { buildSafeFilter } from './filter-builder.js';
+import { EmbeddingGenerationError } from '../errors.js';
 
 export interface SearchOptions {
   /** Maximum number of results to return */
@@ -33,62 +35,6 @@ export interface HybridSearchResult extends SearchResult {
 const DEFAULT_LIMIT = 10;
 const DEFAULT_CANDIDATE_MULTIPLIER = 5;
 
-// Map file extensions to language names used in the index
-const EXTENSION_TO_LANGUAGE: Record<string, string> = {
-  '.ts': 'typescript',
-  '.tsx': 'typescript',
-  '.js': 'javascript',
-  '.jsx': 'javascript',
-  '.mjs': 'javascript',
-  '.cjs': 'javascript',
-  '.py': 'python',
-  '.pyw': 'python',
-  '.go': 'go',
-  '.rs': 'rust',
-};
-
-/**
- * Build a LanceDB filter string from search options
- */
-function buildFilter(options: SearchOptions): string | undefined {
-  const conditions: string[] = [];
-
-  if (options.path) {
-    // Filter by directory path prefix using id field (which contains path info)
-    // The id is generated as: filePath with / and . replaced by _
-    const pathPattern = options.path
-      .replace(/[\\\/]/g, '_')
-      .replace(/\./g, '_')
-      .replace(/'/g, "''");
-    conditions.push(`id LIKE '${pathPattern}%'`);
-  }
-
-  if (options.filePattern) {
-    // Check if it's a simple extension pattern like "*.py" or "*.ts"
-    const extMatch = options.filePattern.match(/^\*(\.[a-z]+)$/i);
-    if (extMatch && extMatch[1]) {
-      const ext = extMatch[1].toLowerCase();
-      const lang = EXTENSION_TO_LANGUAGE[ext];
-      if (lang) {
-        // Use language field for better performance and reliability
-        conditions.push(`language = '${lang}'`);
-      }
-    } else {
-      // For complex patterns, convert to id-based LIKE pattern
-      const idPattern = options.filePattern
-        .replace(/\*\*/g, '%')
-        .replace(/\*/g, '%')
-        .replace(/\?/g, '_')
-        .replace(/[\\\/]/g, '_')
-        .replace(/\./g, '_')
-        .replace(/'/g, "''");
-      conditions.push(`id LIKE '%${idPattern}'`);
-    }
-  }
-
-  return conditions.length > 0 ? conditions.join(' AND ') : undefined;
-}
-
 /**
  * Perform hybrid search combining vector similarity and keyword matching
  */
@@ -113,11 +59,21 @@ export async function hybridSearch(
 
   // Step 1: Generate query embedding
   onProgress?.('Generating query embedding...');
-  const { embedding: queryVector } = await embedQuery(query, { onProgress });
+  let queryVector: number[];
+  try {
+    const result = await embedQuery(query, { onProgress });
+    queryVector = result.embedding;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new EmbeddingGenerationError(
+      `Failed to generate query embedding: ${message}`,
+      error instanceof Error ? error : undefined
+    );
+  }
 
   // Step 2: Vector similarity search (get more candidates for reranking)
   const candidateCount = useReranking ? limit * candidateMultiplier : limit;
-  const filter = buildFilter(options);
+  const filter = buildSafeFilter(options);
 
   onProgress?.(`Searching for ${candidateCount} candidates...`);
   const vectorResults = await store.vectorSearch(queryVector, candidateCount, filter);
@@ -172,10 +128,20 @@ export async function vectorOnlySearch(
 
   // Generate query embedding
   onProgress?.('Generating query embedding...');
-  const { embedding: queryVector } = await embedQuery(query, { onProgress });
+  let queryVector: number[];
+  try {
+    const result = await embedQuery(query, { onProgress });
+    queryVector = result.embedding;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new EmbeddingGenerationError(
+      `Failed to generate query embedding: ${message}`,
+      error instanceof Error ? error : undefined
+    );
+  }
 
   // Vector search
-  const filter = buildFilter(options);
+  const filter = buildSafeFilter(options);
   onProgress?.(`Searching...`);
   const results = await store.vectorSearch(queryVector, limit, filter);
 

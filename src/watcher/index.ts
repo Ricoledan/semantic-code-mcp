@@ -322,30 +322,35 @@ export class FileWatcher {
     }
 
     // Set new debounced handler
-    const timer = setTimeout(async () => {
+    const timer = setTimeout(() => {
       this.debounceTimers.delete(filePath);
-
-      const { shouldIndex } = shouldIndexFile(filePath, this.maxFileSize);
-      if (!shouldIndex) return;
-
-      try {
-        // Delete old records
-        await this.store.deleteByFilePath(filePath);
-
-        // Index the file
-        const records = await indexFile(filePath, this.store, this.onProgress);
-        if (records.length > 0) {
-          await this.store.upsert(records);
-          this.onProgress?.(
-            `Re-indexed: ${path.basename(filePath)} (${records.length} chunks)`
-          );
-        }
-      } catch (error) {
+      // Execute async logic separately to enable proper error handling
+      this.processFileChange(filePath).catch((error) => {
         this.onProgress?.(`Error re-indexing ${filePath}: ${error}`);
-      }
+      });
     }, this.debounceMs);
 
     this.debounceTimers.set(filePath, timer);
+  }
+
+  /**
+   * Process file change asynchronously (extracted for proper error handling)
+   */
+  private async processFileChange(filePath: string): Promise<void> {
+    const { shouldIndex } = shouldIndexFile(filePath, this.maxFileSize);
+    if (!shouldIndex) return;
+
+    // Delete old records
+    await this.store.deleteByFilePath(filePath);
+
+    // Index the file
+    const records = await indexFile(filePath, this.store, this.onProgress);
+    if (records.length > 0) {
+      await this.store.upsert(records);
+      this.onProgress?.(
+        `Re-indexed: ${path.basename(filePath)} (${records.length} chunks)`
+      );
+    }
   }
 
   /**
