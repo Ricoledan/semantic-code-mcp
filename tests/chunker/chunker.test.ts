@@ -225,6 +225,136 @@ impl Calculator {
       });
     });
 
+    describe('Java', () => {
+      it('should chunk Java classes and methods', async () => {
+        const code = `
+public class Calculator {
+    private int value = 0;
+
+    public Calculator add(int n) {
+        this.value += n;
+        return this;
+    }
+
+    public int getValue() {
+        return this.value;
+    }
+}
+`;
+        const chunks = await chunkCode(code, '/test/Calculator.java');
+
+        expect(chunks.length).toBeGreaterThan(0);
+        expect(chunks[0]?.language).toBe('java');
+      });
+
+      it('should chunk Java interfaces', async () => {
+        const code = `
+public interface Addable {
+    int add(int a, int b);
+    int subtract(int a, int b);
+}
+`;
+        const chunks = await chunkCode(code, '/test/Addable.java');
+
+        expect(chunks.length).toBeGreaterThan(0);
+        const interfaceChunk = chunks.find((c) => c.nodeType === 'interface_declaration');
+        expect(interfaceChunk).toBeDefined();
+      });
+    });
+
+    describe('C#', () => {
+      it('should chunk C# classes and methods', async () => {
+        const code = `
+public class Calculator
+{
+    private int value = 0;
+
+    public Calculator Add(int n)
+    {
+        this.value += n;
+        return this;
+    }
+
+    public int Value => value;
+}
+`;
+        const chunks = await chunkCode(code, '/test/Calculator.cs');
+
+        expect(chunks.length).toBeGreaterThan(0);
+        expect(chunks[0]?.language).toBe('csharp');
+      });
+
+      it('should chunk C# interfaces', async () => {
+        const code = `
+public interface ICalculator
+{
+    int Add(int a, int b);
+    int Subtract(int a, int b);
+}
+`;
+        const chunks = await chunkCode(code, '/test/ICalculator.cs');
+
+        expect(chunks.length).toBeGreaterThan(0);
+      });
+    });
+
+    describe('C++', () => {
+      it('should chunk C++ functions', async () => {
+        const code = `
+#include <string>
+
+std::string hello(const std::string& name) {
+    return "Hello, " + name + "!";
+}
+`;
+        const chunks = await chunkCode(code, '/test/hello.cpp');
+
+        expect(chunks.length).toBeGreaterThan(0);
+        expect(chunks[0]?.language).toBe('cpp');
+      });
+
+      it('should chunk C++ classes and methods', async () => {
+        const code = `
+class Calculator {
+private:
+    int value = 0;
+
+public:
+    Calculator& add(int n) {
+        value += n;
+        return *this;
+    }
+
+    int getValue() const {
+        return value;
+    }
+};
+`;
+        const chunks = await chunkCode(code, '/test/Calculator.cpp');
+
+        expect(chunks.length).toBeGreaterThan(0);
+      });
+
+      it('should handle header files', async () => {
+        const code = `
+#ifndef CALCULATOR_H
+#define CALCULATOR_H
+
+class Calculator {
+public:
+    Calculator();
+    int add(int a, int b);
+};
+
+#endif
+`;
+        const chunks = await chunkCode(code, '/test/Calculator.h');
+
+        expect(chunks.length).toBeGreaterThan(0);
+        expect(chunks[0]?.language).toBe('cpp');
+      });
+    });
+
     describe('Large content splitting', () => {
       it('should split large functions into multiple chunks', async () => {
         // Create a very long function

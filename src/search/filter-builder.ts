@@ -110,7 +110,7 @@ export function validateFilterPattern(pattern: string): boolean {
 export function sanitizePathPattern(path: string): string {
   // Replace path separators and dots with underscores
   const sanitized = path
-    .replace(/[\\\/]/g, '_')
+    .replace(/[\\/]/g, '_')
     .replace(/\./g, '_');
 
   // Validate the result
@@ -147,11 +147,11 @@ export function sanitizePathPattern(path: string): string {
  */
 export function sanitizeGlobPattern(pattern: string): string {
   // Convert glob patterns to SQL LIKE patterns
-  let sanitized = pattern
+  const sanitized = pattern
     .replace(/\*\*/g, '%')      // ** -> %
     .replace(/\*/g, '%')         // * -> %
     .replace(/\?/g, '_')         // ? -> _
-    .replace(/[\\\/]/g, '_')     // path separators -> _
+    .replace(/[\\/]/g, '_')     // path separators -> _
     .replace(/\./g, '_');        // . -> _
 
   // Validate the result

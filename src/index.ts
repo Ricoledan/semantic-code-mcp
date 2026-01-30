@@ -104,7 +104,7 @@ async function startServer() {
     signature: z.string().nullable(),
   });
 
-  const OutputSchema = z.object({
+  const _OutputSchema = z.object({
     results: z.array(SearchResultSchema),
     totalResults: z.number(),
     query: z.string(),

@@ -6,6 +6,7 @@
 import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers';
 import { ModelLoadError, EmbeddingGenerationError } from '../errors.js';
 import { detectDevice, type DeviceType } from '../utils/gpu.js';
+import { LRUCache } from '../utils/cache.js';
 
 // Configure transformers.js to use local cache
 env.cacheDir = process.env.HOME
@@ -68,6 +69,9 @@ let pipelineInstance: FeatureExtractionPipeline | null = null;
 let loadingPromise: Promise<FeatureExtractionPipeline> | null = null;
 let currentModel: string | null = null;
 
+// Query embedding cache for frequently repeated queries
+const queryEmbeddingCache = new LRUCache<number[]>({ maxSize: 100 });
+
 /**
  * Initialize the embedding pipeline with modern transformers.js options
  */
@@ -117,7 +121,7 @@ async function getEmbeddingPipeline(
           pipelineInstance = pipe;
           currentModel = model;
           return pipe;
-        } catch (fallbackError) {
+        } catch (_fallbackError) {
           // Fall through to original error
         }
       }
@@ -215,13 +219,24 @@ export async function embed(
 }
 
 /**
- * Generate embedding for a search query
+ * Generate embedding for a search query.
+ * Uses an LRU cache to avoid regenerating embeddings for repeated queries.
  */
 export async function embedQuery(
   query: string,
   options: EmbedderOptions = {}
 ): Promise<EmbeddingResult> {
   const { model = DEFAULT_MODEL, dtype = DEFAULT_DTYPE, onProgress } = options;
+
+  // Check cache first
+  const cacheKey = `${model}:${query}`;
+  const cachedEmbedding = queryEmbeddingCache.get(cacheKey);
+  if (cachedEmbedding) {
+    return {
+      embedding: cachedEmbedding,
+      tokenCount: Math.ceil(query.length / 4),
+    };
+  }
 
   let pipe: FeatureExtractionPipeline;
   try {
@@ -250,6 +265,9 @@ export async function embedQuery(
 
     // Validate the embedding
     validateEmbedding(embedding);
+
+    // Cache the result
+    queryEmbeddingCache.set(cacheKey, embedding);
 
     return {
       embedding,
@@ -494,4 +512,19 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   if (magnitude === 0) return 0;
 
   return dotProduct / magnitude;
+}
+
+/**
+ * Clear the query embedding cache.
+ * Useful for testing or when model changes.
+ */
+export function clearQueryCache(): void {
+  queryEmbeddingCache.clear();
+}
+
+/**
+ * Get query cache statistics for debugging.
+ */
+export function getQueryCacheStats(): { size: number; maxSize: number; ttlMs: number | undefined } {
+  return queryEmbeddingCache.getStats();
 }

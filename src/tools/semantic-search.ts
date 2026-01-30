@@ -6,7 +6,7 @@
 import { z } from 'zod';
 import * as path from 'path';
 import { VectorStore } from '../store/index.js';
-import { hybridSearch, formatSearchResults, type HybridSearchResult } from '../search/index.js';
+import { hybridSearch } from '../search/index.js';
 import { indexDirectory, FileWatcher } from '../watcher/index.js';
 import { PathTraversalError } from '../errors.js';
 

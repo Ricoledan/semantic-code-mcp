@@ -28,7 +28,7 @@ import { InvalidIdError } from '../errors.js';
  * - `components_Button_tsx_L15_p0`
  * - `my-project_src_index_ts_L1`
  */
-const VALID_ID_PATTERN = /^[a-zA-Z0-9_\-]+$/;
+const VALID_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
 
 /**
  * Maximum allowed length for chunk IDs.

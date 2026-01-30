@@ -72,7 +72,7 @@ async function loadLanguage(lang: string): Promise<unknown> {
     return languageCache.get(lang);
   }
 
-  let languageModule: TreeSitterLanguageModule;
+  let _languageModule: TreeSitterLanguageModule;
 
   try {
     let language: unknown;
@@ -111,6 +111,21 @@ async function loadLanguage(lang: string): Promise<unknown> {
       case 'rust': {
         const rustModule = await import('tree-sitter-rust');
         language = rustModule.default ?? rustModule;
+        break;
+      }
+      case 'java': {
+        const javaModule = await import('tree-sitter-java');
+        language = javaModule.default ?? javaModule;
+        break;
+      }
+      case 'csharp': {
+        const csharpModule = await import('tree-sitter-c-sharp');
+        language = csharpModule.default ?? csharpModule;
+        break;
+      }
+      case 'cpp': {
+        const cppModule = await import('tree-sitter-cpp');
+        language = cppModule.default ?? cppModule;
         break;
       }
       default:
@@ -242,7 +257,7 @@ function extractDocstring(
  * Generate chunk ID from file path and position
  */
 function generateChunkId(filePath: string, startLine: number): string {
-  const normalized = filePath.replace(/[\\\/]/g, '_').replace(/\./g, '_');
+  const normalized = filePath.replace(/[\\/]/g, '_').replace(/\./g, '_');
   return `${normalized}_L${startLine}`;
 }
 

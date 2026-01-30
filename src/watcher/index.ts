@@ -8,8 +8,8 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { glob } from 'glob';
 import chokidar from 'chokidar';
-import { chunkCode, type CodeChunk } from '../chunker/index.js';
-import { embed, embedBatch } from '../embedder/index.js';
+import { chunkCode } from '../chunker/index.js';
+import { embedBatch } from '../embedder/index.js';
 import { VectorStore, createVectorRecord, type VectorRecord } from '../store/index.js';
 import { getSupportedExtensions } from '../chunker/languages.js';
 
@@ -267,7 +267,7 @@ export async function indexDirectory(options: IndexerOptions): Promise<IndexStat
     onProgress?.(`Processing batch ${batchNum}/${totalBatches}`);
 
     for (const filePath of batch) {
-      const { shouldIndex, reason } = shouldIndexFile(filePath, maxFileSize);
+      const { shouldIndex, reason: _reason } = shouldIndexFile(filePath, maxFileSize);
 
       if (!shouldIndex) {
         stats.skippedFiles++;

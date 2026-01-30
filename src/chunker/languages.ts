@@ -77,6 +77,45 @@ export const LANGUAGE_CONFIGS: Record<string, LanguageConfig> = {
     nameNodeTypes: ['identifier'],
     docstringNodeTypes: ['line_comment', 'block_comment'],
   },
+  java: {
+    extensions: ['.java'],
+    chunkNodeTypes: [
+      'class_declaration',
+      'method_declaration',
+      'interface_declaration',
+      'constructor_declaration',
+      'enum_declaration',
+      'record_declaration',
+    ],
+    nameNodeTypes: ['identifier'],
+    docstringNodeTypes: ['block_comment', 'line_comment'],
+  },
+  csharp: {
+    extensions: ['.cs'],
+    chunkNodeTypes: [
+      'class_declaration',
+      'method_declaration',
+      'interface_declaration',
+      'constructor_declaration',
+      'struct_declaration',
+      'property_declaration',
+      'namespace_declaration',
+    ],
+    nameNodeTypes: ['identifier'],
+    docstringNodeTypes: ['comment'],
+  },
+  cpp: {
+    extensions: ['.cpp', '.cc', '.cxx', '.hpp', '.h', '.hxx'],
+    chunkNodeTypes: [
+      'function_definition',
+      'class_specifier',
+      'struct_specifier',
+      'template_declaration',
+      'namespace_definition',
+    ],
+    nameNodeTypes: ['identifier', 'field_identifier'],
+    docstringNodeTypes: ['comment'],
+  },
 };
 
 /**

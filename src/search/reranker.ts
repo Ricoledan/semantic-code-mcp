@@ -81,13 +81,14 @@ async function getRerankerPipeline(
           rerankerPipeline = pipe;
           currentRerankerModel = model;
           return pipe;
-        } catch (fallbackError) {
+        } catch (_fallbackError) {
           // Fall through to original error
         }
       }
 
       rerankerLoadingPromise = null;
-      throw new Error(`Failed to load reranker model: ${error}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to load reranker model: ${errorMessage}`);
     }
   })();
 
@@ -137,7 +138,7 @@ export async function rerank(
             ...result,
             score: relevanceScore,
           };
-        } catch (error) {
+        } catch (_error) {
           // On error, keep original score and increment error count
           errorCount++;
           return result;
