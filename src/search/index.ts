@@ -33,6 +33,20 @@ export interface HybridSearchResult extends SearchResult {
 const DEFAULT_LIMIT = 10;
 const DEFAULT_CANDIDATE_MULTIPLIER = 5;
 
+// Map file extensions to language names used in the index
+const EXTENSION_TO_LANGUAGE: Record<string, string> = {
+  '.ts': 'typescript',
+  '.tsx': 'typescript',
+  '.js': 'javascript',
+  '.jsx': 'javascript',
+  '.mjs': 'javascript',
+  '.cjs': 'javascript',
+  '.py': 'python',
+  '.pyw': 'python',
+  '.go': 'go',
+  '.rs': 'rust',
+};
+
 /**
  * Build a LanceDB filter string from search options
  */
@@ -40,20 +54,36 @@ function buildFilter(options: SearchOptions): string | undefined {
   const conditions: string[] = [];
 
   if (options.path) {
-    // Filter by directory path prefix
-    const pathPrefix = options.path.replace(/'/g, "''");
-    conditions.push(`filePath LIKE '${pathPrefix}%'`);
+    // Filter by directory path prefix using id field (which contains path info)
+    // The id is generated as: filePath with / and . replaced by _
+    const pathPattern = options.path
+      .replace(/[\\\/]/g, '_')
+      .replace(/\./g, '_')
+      .replace(/'/g, "''");
+    conditions.push(`id LIKE '${pathPattern}%'`);
   }
 
   if (options.filePattern) {
-    // Convert glob pattern to SQL LIKE pattern
-    // This is a simplified conversion
-    const likePattern = options.filePattern
-      .replace(/\*\*/g, '%')
-      .replace(/\*/g, '%')
-      .replace(/\?/g, '_')
-      .replace(/'/g, "''");
-    conditions.push(`filePath LIKE '%${likePattern}'`);
+    // Check if it's a simple extension pattern like "*.py" or "*.ts"
+    const extMatch = options.filePattern.match(/^\*(\.[a-z]+)$/i);
+    if (extMatch && extMatch[1]) {
+      const ext = extMatch[1].toLowerCase();
+      const lang = EXTENSION_TO_LANGUAGE[ext];
+      if (lang) {
+        // Use language field for better performance and reliability
+        conditions.push(`language = '${lang}'`);
+      }
+    } else {
+      // For complex patterns, convert to id-based LIKE pattern
+      const idPattern = options.filePattern
+        .replace(/\*\*/g, '%')
+        .replace(/\*/g, '%')
+        .replace(/\?/g, '_')
+        .replace(/[\\\/]/g, '_')
+        .replace(/\./g, '_')
+        .replace(/'/g, "''");
+      conditions.push(`id LIKE '%${idPattern}'`);
+    }
   }
 
   return conditions.length > 0 ? conditions.join(' AND ') : undefined;
