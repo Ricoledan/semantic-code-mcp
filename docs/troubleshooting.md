@@ -51,6 +51,34 @@ rm -rf .semantic-code/index/
 # Restart the server - index rebuilds automatically
 ```
 
+#### Clearing the Index
+
+The index can be safely cleared at any time. It will automatically rebuild on the next search.
+
+**When to clear:**
+- Index seems bloated or stale
+- After major refactoring (file renames/moves outside editor)
+- Switching between branches with very different file structures
+- Any unexplained search issues
+
+**How to clear:**
+```bash
+rm -rf .semantic-code/index/
+# Index rebuilds automatically on next search
+```
+
+**What happens:**
+- All indexed data is removed
+- Next search triggers a full re-index
+- No configuration is lost (only the vector data)
+
+**Note:** You don't need to clear regularly. The index automatically:
+- Skips unchanged files (via content hashing)
+- Updates modified files (delete + re-insert)
+- Removes deleted files (via file watcher)
+
+Clearing is only needed for edge cases like files renamed outside the editor while the server wasn't running.
+
 #### Index Not Updating
 
 **Symptoms**: Changes to code aren't reflected in search results
