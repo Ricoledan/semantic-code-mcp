@@ -184,6 +184,12 @@ Invalid inputs throw typed errors (`InvalidFilterError`, `PathTraversalError`, `
 - Model cache: `~/.cache/semantic-code-mcp/`
 - Estimated size: 3GB codebase → ~1.5GB index (with float16)
 
+## Documentation
+
+- [Deployment Guide](./docs/deployment.md) - Production deployment, Docker, performance tuning
+- [Troubleshooting Guide](./docs/troubleshooting.md) - Common issues and solutions
+- [Architecture Overview](./docs/architecture.md) - Internal design and data flow
+
 ## Development
 
 ```bash
@@ -195,6 +201,14 @@ yarn build
 
 # Run in development
 yarn dev
+
+# Run tests
+yarn test
+
+# Run specific test suites
+yarn test -- tests/integration/    # Integration tests
+yarn test -- tests/edge-cases/     # Edge case tests
+yarn test -- tests/performance/    # Performance benchmarks
 ```
 
 ## Project Structure

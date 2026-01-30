@@ -170,7 +170,27 @@ const DEFAULT_INDEX_DIR = '.semantic-code/index';
 const DEFAULT_TABLE_NAME = 'code_chunks';
 
 /**
- * LanceDB-based vector store using modern API patterns
+ * LanceDB-based vector store using modern API patterns.
+ *
+ * Provides a serverless embedded vector database with:
+ * - Vector similarity search
+ * - Full-text search (FTS) for keyword matching
+ * - Graceful shutdown with operation tracking
+ *
+ * @example
+ * ```typescript
+ * const store = new VectorStore({ indexDir: '.semantic-code/index' });
+ * await store.initialize();
+ *
+ * // Upsert records
+ * await store.upsert(records);
+ *
+ * // Search
+ * const results = await store.vectorSearch(queryVector, 10);
+ *
+ * // Clean up
+ * await store.close();
+ * ```
  */
 export class VectorStore {
   private db: lancedb.Connection | null = null;
@@ -180,9 +200,47 @@ export class VectorStore {
   private initialized = false;
   private ftsIndexCreated = false;
 
+  /** Flag indicating store is being closed */
+  private isClosing = false;
+
+  /** Counter for pending operations (for graceful shutdown) */
+  private pendingOperations = 0;
+
+  /** Promise that resolves when all pending operations complete */
+  private closePromise: Promise<void> | null = null;
+  private closeResolve: (() => void) | null = null;
+
   constructor(options: StoreOptions = {}) {
     this.indexDir = options.indexDir || DEFAULT_INDEX_DIR;
     this.tableName = options.tableName || DEFAULT_TABLE_NAME;
+  }
+
+  /**
+   * Track the start of an operation.
+   * @throws Error if store is closing
+   */
+  private startOperation(): void {
+    if (this.isClosing) {
+      throw new Error('VectorStore is closing, cannot start new operations');
+    }
+    this.pendingOperations++;
+  }
+
+  /**
+   * Track the end of an operation.
+   */
+  private endOperation(): void {
+    this.pendingOperations--;
+    if (this.pendingOperations === 0 && this.closeResolve) {
+      this.closeResolve();
+    }
+  }
+
+  /**
+   * Check if the store is available for operations.
+   */
+  isAvailable(): boolean {
+    return this.initialized && !this.isClosing;
   }
 
   /**
@@ -236,16 +294,21 @@ export class VectorStore {
   }
 
   /**
-   * Create or update the table with records
+   * Create or update the table with records.
+   *
+   * @param records - Vector records to upsert
+   * @throws Error if store is closing or not initialized
    */
   async upsert(records: VectorRecord[]): Promise<void> {
-    await this.ensureInitialized();
+    this.startOperation();
+    try {
+      await this.ensureInitialized();
 
-    if (!this.db) {
-      throw new Error('Database not initialized');
-    }
+      if (!this.db) {
+        throw new Error('Database not initialized');
+      }
 
-    if (records.length === 0) return;
+      if (records.length === 0) return;
 
     // Convert records to the format LanceDB expects
     const data = records.map((record) => ({
@@ -264,119 +327,153 @@ export class VectorStore {
       indexedAt: record.indexedAt,
     }));
 
-    if (!this.table) {
-      // Create table with first batch
-      this.table = await this.db.createTable(this.tableName, data, {
-        mode: 'overwrite',
-      });
-      // Create FTS index after table creation
-      await this.ensureFtsIndex();
-    } else {
-      // For upsert, delete existing records with same IDs first
-      const ids = records.map((r) => r.id);
-      // Validate all IDs before constructing the SQL query
-      validateIds(ids);
-      try {
-        await this.table.delete(`id IN ('${ids.join("','")}')`);
-      } catch {
-        // Table might be empty or IDs don't exist
+      if (!this.table) {
+        // Create table with first batch
+        this.table = await this.db.createTable(this.tableName, data, {
+          mode: 'overwrite',
+        });
+        // Create FTS index after table creation
+        await this.ensureFtsIndex();
+      } else {
+        // For upsert, delete existing records with same IDs first
+        const ids = records.map((r) => r.id);
+        // Validate all IDs before constructing the SQL query
+        validateIds(ids);
+        try {
+          await this.table.delete(`id IN ('${ids.join("','")}')`);
+        } catch {
+          // Table might be empty or IDs don't exist
+        }
+        await this.table.add(data);
       }
-      await this.table.add(data);
+    } finally {
+      this.endOperation();
     }
   }
 
   /**
-   * Delete records by file path
+   * Delete records by file path.
+   *
+   * @param filePath - The file path to delete records for
    */
   async deleteByFilePath(filePath: string): Promise<void> {
-    await this.ensureInitialized();
-
-    if (!this.table) return;
-
+    this.startOperation();
     try {
-      await this.table.delete(`filePath = '${filePath.replace(/'/g, "''")}'`);
-    } catch {
-      // Ignore errors if no records match
+      await this.ensureInitialized();
+
+      if (!this.table) return;
+
+      try {
+        await this.table.delete(`filePath = '${filePath.replace(/'/g, "''")}'`);
+      } catch {
+        // Ignore errors if no records match
+      }
+    } finally {
+      this.endOperation();
     }
   }
 
   /**
-   * Delete all records
+   * Delete all records.
    */
   async clear(): Promise<void> {
-    await this.ensureInitialized();
+    this.startOperation();
+    try {
+      await this.ensureInitialized();
 
-    if (!this.db) return;
+      if (!this.db) return;
 
-    const tables = await this.db.tableNames();
-    if (tables.includes(this.tableName)) {
-      await this.db.dropTable(this.tableName);
-      this.table = null;
-      this.ftsIndexCreated = false;
+      const tables = await this.db.tableNames();
+      if (tables.includes(this.tableName)) {
+        await this.db.dropTable(this.tableName);
+        this.table = null;
+        this.ftsIndexCreated = false;
+      }
+    } finally {
+      this.endOperation();
     }
   }
 
   /**
-   * Vector similarity search using modern query API
+   * Vector similarity search using modern query API.
+   *
+   * @param queryVector - The query embedding vector
+   * @param limit - Maximum number of results to return
+   * @param filter - Optional SQL WHERE clause for filtering
+   * @returns Array of search results sorted by similarity
    */
   async vectorSearch(
     queryVector: number[],
     limit: number = 50,
     filter?: string
   ): Promise<SearchResult[]> {
-    await this.ensureInitialized();
+    this.startOperation();
+    try {
+      await this.ensureInitialized();
 
-    if (!this.table) {
-      return [];
+      if (!this.table) {
+        return [];
+      }
+
+      // Use modern query().nearestTo() API
+      let query = this.table
+        .query()
+        .nearestTo(queryVector)
+        .distanceType('cosine')
+        .limit(limit);
+
+      if (filter) {
+        query = query.where(filter);
+      }
+
+      const results = await query.toArray();
+
+      return results.map((row) => ({
+        record: this.rowToRecord(row),
+        // Convert distance to similarity score (cosine distance to similarity)
+        score: row._distance != null ? 1 - (row._distance as number) : 0,
+      }));
+    } finally {
+      this.endOperation();
     }
-
-    // Use modern query().nearestTo() API
-    let query = this.table
-      .query()
-      .nearestTo(queryVector)
-      .distanceType('cosine')
-      .limit(limit);
-
-    if (filter) {
-      query = query.where(filter);
-    }
-
-    const results = await query.toArray();
-
-    return results.map((row) => ({
-      record: this.rowToRecord(row),
-      // Convert distance to similarity score (cosine distance to similarity)
-      score: row._distance != null ? 1 - (row._distance as number) : 0,
-    }));
   }
 
   /**
-   * Full-text search using LanceDB FTS
+   * Full-text search using LanceDB FTS.
+   *
+   * @param queryText - The search query text
+   * @param limit - Maximum number of results to return
+   * @returns Array of search results sorted by relevance
    */
   async fullTextSearch(
     queryText: string,
     limit: number = 50
   ): Promise<SearchResult[]> {
-    await this.ensureInitialized();
-
-    if (!this.table) {
-      return [];
-    }
-
+    this.startOperation();
     try {
-      // Try native FTS search
-      const results = await this.table
-        .search(queryText, 'fts')
-        .limit(limit)
-        .toArray();
+      await this.ensureInitialized();
 
-      return results.map((row) => ({
-        record: this.rowToRecord(row),
-        score: row._score != null ? (row._score as number) : 0.5,
-      }));
-    } catch {
-      // Fall back to manual keyword matching if FTS not available
-      return this.fallbackTextSearch(queryText, limit);
+      if (!this.table) {
+        return [];
+      }
+
+      try {
+        // Try native FTS search
+        const results = await this.table
+          .search(queryText, 'fts')
+          .limit(limit)
+          .toArray();
+
+        return results.map((row) => ({
+          record: this.rowToRecord(row),
+          score: row._score != null ? (row._score as number) : 0.5,
+        }));
+      } catch {
+        // Fall back to manual keyword matching if FTS not available
+        return this.fallbackTextSearch(queryText, limit);
+      }
+    } finally {
+      this.endOperation();
     }
   }
 
@@ -489,13 +586,55 @@ export class VectorStore {
   }
 
   /**
-   * Close the database connection
+   * Close the database connection gracefully.
+   *
+   * Waits for all pending operations to complete before closing.
+   * New operations will throw an error once close() is called.
+   *
+   * @param timeout - Maximum time to wait for pending operations (default: 30000ms)
    */
-  async close(): Promise<void> {
+  async close(timeout: number = 30000): Promise<void> {
+    if (this.isClosing) {
+      // Already closing, wait for the existing close to complete
+      if (this.closePromise) {
+        await this.closePromise;
+      }
+      return;
+    }
+
+    this.isClosing = true;
+
+    // Wait for pending operations if any
+    if (this.pendingOperations > 0) {
+      this.closePromise = new Promise<void>((resolve) => {
+        this.closeResolve = resolve;
+
+        // Set a timeout to prevent indefinite waiting
+        setTimeout(() => {
+          if (this.closeResolve) {
+            this.closeResolve();
+          }
+        }, timeout);
+      });
+
+      await this.closePromise;
+    }
+
+    // Clean up
     this.db = null;
     this.table = null;
     this.initialized = false;
     this.ftsIndexCreated = false;
+    this.closePromise = null;
+    this.closeResolve = null;
+    this.pendingOperations = 0;
+  }
+
+  /**
+   * Get the number of pending operations.
+   */
+  getPendingOperationCount(): number {
+    return this.pendingOperations;
   }
 }
 

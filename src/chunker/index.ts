@@ -1,6 +1,18 @@
 /**
  * AST-aware code chunker using tree-sitter.
- * Splits code into semantic units (functions, classes, methods) for better embedding quality.
+ *
+ * Splits code into semantic units (functions, classes, methods) for better
+ * embedding quality. Uses tree-sitter for accurate parsing across multiple
+ * languages.
+ *
+ * Features:
+ * - Semantic chunking at function/class/method boundaries
+ * - Automatic splitting of large chunks with overlap
+ * - Fallback to line-based chunking for unsupported languages
+ * - BOM stripping for cross-platform compatibility
+ * - Depth limiting to prevent stack overflow on pathological inputs
+ *
+ * @module chunker
  */
 
 import Parser from 'tree-sitter';
@@ -10,6 +22,16 @@ import {
   getLanguageByExtension,
   type LanguageConfig,
 } from './languages.js';
+import { stripBOM } from '../utils/paths.js';
+import { createLogger } from '../utils/logger.js';
+
+const log = createLogger('chunker');
+
+/**
+ * Maximum recursion depth for AST traversal.
+ * Prevents stack overflow on pathologically nested code.
+ */
+const MAX_RECURSION_DEPTH = 100;
 
 export interface CodeChunk {
   /** Unique identifier for the chunk */
@@ -279,18 +301,38 @@ function splitLargeContent(
 }
 
 /**
- * Main chunking function - processes source code into semantic chunks
+ * Main chunking function - processes source code into semantic chunks.
+ *
+ * Parses source code using tree-sitter and extracts semantic units
+ * (functions, classes, methods) as individual chunks. Large chunks
+ * are automatically split with overlap for better embedding quality.
+ *
+ * @param sourceCode - The source code content to chunk
+ * @param filePath - The file path (used for language detection and IDs)
+ * @returns Array of code chunks with metadata
+ *
+ * @example
+ * ```typescript
+ * const chunks = await chunkCode(fileContent, '/project/src/auth.ts');
+ * for (const chunk of chunks) {
+ *   console.log(`${chunk.name}: ${chunk.startLine}-${chunk.endLine}`);
+ * }
+ * ```
  */
 export async function chunkCode(
   sourceCode: string,
   filePath: string
 ): Promise<CodeChunk[]> {
+  // Strip BOM if present (common in files from Windows editors)
+  const cleanedSource = stripBOM(sourceCode);
+
   const ext = path.extname(filePath);
   let lang = getLanguageByExtension(ext);
 
   if (!lang) {
     // Fall back to simple line-based chunking for unsupported languages
-    return fallbackChunking(sourceCode, filePath);
+    log.debug('Unsupported language, using fallback chunking', { filePath, ext });
+    return fallbackChunking(cleanedSource, filePath);
   }
 
   // Handle TSX separately
@@ -300,7 +342,7 @@ export async function chunkCode(
 
   const config = LANGUAGE_CONFIGS[lang === 'tsx' ? 'typescript' : lang];
   if (!config) {
-    return fallbackChunking(sourceCode, filePath);
+    return fallbackChunking(cleanedSource, filePath);
   }
 
   try {
@@ -309,20 +351,20 @@ export async function chunkCode(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     parser.setLanguage(language as any);
 
-    const tree = parser.parse(sourceCode);
+    const tree = parser.parse(cleanedSource);
     const chunks: CodeChunk[] = [];
 
-    // Collect all semantic nodes
+    // Collect all semantic nodes with depth limiting
     const semanticNodes: Parser.SyntaxNode[] = [];
-    collectSemanticNodes(tree.rootNode, config.chunkNodeTypes, semanticNodes);
+    collectSemanticNodes(tree.rootNode, config.chunkNodeTypes, semanticNodes, 0);
 
     for (const node of semanticNodes) {
       const content = node.text;
       const startLine = node.startPosition.row + 1; // 1-indexed
       const endLine = node.endPosition.row + 1;
       const name = extractName(node, config);
-      const signature = extractSignature(node, sourceCode);
-      const docstring = extractDocstring(node, sourceCode, config);
+      const signature = extractSignature(node, cleanedSource);
+      const docstring = extractDocstring(node, cleanedSource, config);
 
       // Skip if too small
       if (isTooSmall(content)) continue;
@@ -364,24 +406,52 @@ export async function chunkCode(
 
     // If we didn't find any semantic nodes, fall back to simple chunking
     if (chunks.length === 0) {
-      return fallbackChunking(sourceCode, filePath);
+      log.debug('No semantic nodes found, using fallback chunking', { filePath });
+      return fallbackChunking(cleanedSource, filePath);
     }
 
+    log.debug('Chunking complete', { filePath, chunkCount: chunks.length });
     return chunks;
   } catch (error) {
-    console.error(`Tree-sitter parsing failed for ${filePath}:`, error);
-    return fallbackChunking(sourceCode, filePath);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    log.warn('Tree-sitter parsing failed, using fallback', {
+      filePath,
+      error: errorMessage,
+      errorType: error instanceof Error ? error.constructor.name : 'Unknown',
+    });
+    return fallbackChunking(cleanedSource, filePath);
   }
 }
 
 /**
- * Recursively collect nodes matching the chunk node types
+ * Recursively collect nodes matching the chunk node types.
+ *
+ * Includes depth limiting to prevent stack overflow on pathologically
+ * nested code structures.
+ *
+ * @param node - The current AST node
+ * @param nodeTypes - Node types to match
+ * @param result - Array to collect matching nodes
+ * @param depth - Current recursion depth
+ *
+ * @internal
  */
 function collectSemanticNodes(
   node: Parser.SyntaxNode,
   nodeTypes: string[],
-  result: Parser.SyntaxNode[]
+  result: Parser.SyntaxNode[],
+  depth: number = 0
 ): void {
+  // Depth limit to prevent stack overflow on deeply nested code
+  if (depth >= MAX_RECURSION_DEPTH) {
+    log.warn('Max recursion depth reached during AST traversal', {
+      depth,
+      nodeType: node.type,
+      startLine: node.startPosition.row + 1,
+    });
+    return;
+  }
+
   if (nodeTypes.includes(node.type)) {
     result.push(node);
     // Don't recurse into matched nodes to avoid duplication
@@ -389,7 +459,7 @@ function collectSemanticNodes(
   }
 
   for (const child of node.children) {
-    collectSemanticNodes(child, nodeTypes, result);
+    collectSemanticNodes(child, nodeTypes, result, depth + 1);
   }
 }
 
@@ -434,13 +504,44 @@ function fallbackChunking(sourceCode: string, filePath: string): CodeChunk[] {
 }
 
 /**
- * Chunk multiple files concurrently
+ * Chunk multiple files concurrently.
+ *
+ * Processes multiple files in parallel for improved performance.
+ * Individual file failures are logged but don't prevent other files
+ * from being processed.
+ *
+ * @param files - Array of file paths and their contents
+ * @returns Array of all code chunks from all files
+ *
+ * @example
+ * ```typescript
+ * const files = [
+ *   { path: '/project/src/auth.ts', content: authCode },
+ *   { path: '/project/src/api.ts', content: apiCode },
+ * ];
+ * const chunks = await chunkFiles(files);
+ * ```
  */
 export async function chunkFiles(
   files: Array<{ path: string; content: string }>
 ): Promise<CodeChunk[]> {
-  const results = await Promise.all(
+  const results = await Promise.allSettled(
     files.map((file) => chunkCode(file.content, file.path))
   );
-  return results.flat();
+
+  const chunks: CodeChunk[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i]!;
+    if (result.status === 'fulfilled') {
+      chunks.push(...result.value);
+    } else {
+      const file = files[i];
+      log.error('Failed to chunk file', {
+        filePath: file?.path,
+        error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+      });
+    }
+  }
+
+  return chunks;
 }

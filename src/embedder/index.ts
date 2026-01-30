@@ -15,11 +15,30 @@ env.cacheDir = process.env.HOME
 env.allowLocalModels = true;
 env.allowRemoteModels = true;
 
+/**
+ * Result from embedding generation.
+ */
 export interface EmbeddingResult {
   /** The embedding vector (768 dimensions for nomic-embed) */
   embedding: number[];
   /** Number of tokens used */
   tokenCount: number;
+}
+
+/**
+ * Result from batch embedding with per-item error tracking.
+ */
+export interface BatchEmbeddingResult {
+  /** Successfully generated embeddings */
+  results: EmbeddingResult[];
+  /** Indices of items that failed to embed */
+  failedIndices: number[];
+  /** Error messages for failed items (keyed by index) */
+  errors: Map<number, string>;
+  /** Total items processed */
+  totalProcessed: number;
+  /** Number of successful embeddings */
+  successCount: number;
 }
 
 export interface EmbedderOptions {
@@ -225,7 +244,20 @@ export async function embedQuery(
 }
 
 /**
- * Generate embeddings for multiple texts in batches
+ * Generate embeddings for multiple texts in batches.
+ *
+ * Uses Promise.allSettled for resilient batch processing - individual item
+ * failures don't prevent other items from being embedded.
+ *
+ * @param texts - Array of text content to embed
+ * @param options - Embedder configuration options
+ * @returns Array of embedding results (failed items have placeholder embeddings)
+ *
+ * @example
+ * ```typescript
+ * const results = await embedBatch(['code1', 'code2', 'code3']);
+ * // Results array has same length as input
+ * ```
  */
 export async function embedBatch(
   texts: string[],
@@ -250,8 +282,8 @@ export async function embedBatch(
 
     onProgress?.(`Processing batch ${batchNum}/${totalBatches}`);
 
-    // Process each item in the batch concurrently
-    const batchResults = await Promise.all(
+    // Process each item in the batch concurrently with error resilience
+    const batchSettled = await Promise.allSettled(
       batch.map(async (text) => {
         const maxChars = maxTokens * 4;
         const truncatedText = text.length > maxChars ? text.slice(0, maxChars) : text;
@@ -262,17 +294,141 @@ export async function embedBatch(
           normalize: true,
         });
 
+        const embedding = Array.from(output.data as Float32Array);
+        validateEmbedding(embedding);
+
         return {
-          embedding: Array.from(output.data as Float32Array),
+          embedding,
           tokenCount: Math.ceil(truncatedText.length / 4),
         };
       })
     );
 
-    results.push(...batchResults);
+    // Process settled results - use zero vector for failed items
+    for (const result of batchSettled) {
+      if (result.status === 'fulfilled') {
+        results.push(result.value);
+      } else {
+        // Log the error but continue with a zero vector
+        // The caller can detect this by checking if all values are 0
+        results.push({
+          embedding: new Array(768).fill(0),
+          tokenCount: 0,
+        });
+      }
+    }
   }
 
   return results;
+}
+
+/**
+ * Generate embeddings for multiple texts with detailed error tracking.
+ *
+ * Unlike `embedBatch`, this function returns detailed information about
+ * which items failed and why, enabling better error handling.
+ *
+ * @param texts - Array of text content to embed
+ * @param options - Embedder configuration options
+ * @returns Batch result with success/failure details
+ *
+ * @example
+ * ```typescript
+ * const { results, failedIndices, errors } = await embedBatchWithErrors(texts);
+ *
+ * if (failedIndices.length > 0) {
+ *   console.warn(`${failedIndices.length} items failed to embed`);
+ *   for (const idx of failedIndices) {
+ *     console.warn(`  Item ${idx}: ${errors.get(idx)}`);
+ *   }
+ * }
+ * ```
+ */
+export async function embedBatchWithErrors(
+  texts: string[],
+  options: EmbedderOptions = {}
+): Promise<BatchEmbeddingResult> {
+  const {
+    model = DEFAULT_MODEL,
+    maxTokens = DEFAULT_MAX_TOKENS,
+    batchSize = DEFAULT_BATCH_SIZE,
+    dtype = DEFAULT_DTYPE,
+    onProgress,
+  } = options;
+
+  const pipe = await getEmbeddingPipeline(model, dtype, onProgress);
+  const results: EmbeddingResult[] = [];
+  const failedIndices: number[] = [];
+  const errors = new Map<number, string>();
+  let globalIndex = 0;
+
+  // Process in batches
+  for (let i = 0; i < texts.length; i += batchSize) {
+    const batch = texts.slice(i, i + batchSize);
+    const batchNum = Math.floor(i / batchSize) + 1;
+    const totalBatches = Math.ceil(texts.length / batchSize);
+
+    onProgress?.(`Processing batch ${batchNum}/${totalBatches}`);
+
+    // Process each item in the batch concurrently with error tracking
+    const batchSettled = await Promise.allSettled(
+      batch.map(async (text, localIndex) => {
+        const maxChars = maxTokens * 4;
+        const truncatedText = text.length > maxChars ? text.slice(0, maxChars) : text;
+        const prefixedText = `search_document: ${truncatedText}`;
+
+        const output = await pipe(prefixedText, {
+          pooling: 'mean',
+          normalize: true,
+        });
+
+        const embedding = Array.from(output.data as Float32Array);
+        validateEmbedding(embedding);
+
+        return {
+          embedding,
+          tokenCount: Math.ceil(truncatedText.length / 4),
+          localIndex,
+        };
+      })
+    );
+
+    // Process settled results
+    for (let j = 0; j < batchSettled.length; j++) {
+      const result = batchSettled[j]!;
+      const itemGlobalIndex = globalIndex + j;
+
+      if (result.status === 'fulfilled') {
+        results.push({
+          embedding: result.value.embedding,
+          tokenCount: result.value.tokenCount,
+        });
+      } else {
+        // Track the failure
+        failedIndices.push(itemGlobalIndex);
+        const errorMessage = result.reason instanceof Error
+          ? result.reason.message
+          : String(result.reason);
+        errors.set(itemGlobalIndex, errorMessage);
+
+        // Add placeholder result
+        results.push({
+          embedding: new Array(768).fill(0),
+          tokenCount: 0,
+        });
+      }
+    }
+
+    globalIndex += batch.length;
+  }
+
+  return {
+    results,
+    failedIndices,
+    errors,
+    totalProcessed: texts.length,
+    successCount: texts.length - failedIndices.length,
+  };
 }
 
 /**

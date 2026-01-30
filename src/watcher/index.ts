@@ -66,7 +66,20 @@ const DEFAULT_IGNORE_PATTERNS = [
 const DEFAULT_MAX_FILE_SIZE = 1024 * 1024; // 1MB
 
 /**
- * Calculate MD5 hash of content
+ * Calculate MD5 hash of content for change detection.
+ *
+ * Used to determine if a file has changed since last indexing.
+ * MD5 is chosen for speed rather than cryptographic security.
+ *
+ * @param content - The string content to hash
+ * @returns Hexadecimal MD5 hash string
+ *
+ * @example
+ * ```typescript
+ * const hash1 = hashContent('function test() {}');
+ * const hash2 = hashContent('function test() {}');
+ * // hash1 === hash2 (same content = same hash)
+ * ```
  */
 export function hashContent(content: string): string {
   return crypto.createHash('md5').update(content).digest('hex');
@@ -170,13 +183,33 @@ const DEFAULT_MAX_CHUNKS_IN_MEMORY = 500;
  * This function processes files in batches and periodically flushes accumulated
  * records to the store to prevent memory issues with very large codebases.
  *
- * Memory management:
+ * ## Memory Management
+ *
  * - Files are processed in configurable batches (default: 10 files)
  * - Records are flushed to the store when maxChunksInMemory is reached (default: 500)
  * - This limits peak memory usage to approximately maxChunksInMemory * 3KB
  *
+ * ## Incremental Indexing
+ *
+ * The function uses content hashing to detect changes:
+ * - Unchanged files (same MD5 hash) are skipped
+ * - Modified files are re-indexed
+ * - Deleted files' records are removed from the store
+ *
  * @param options - Indexing configuration options
  * @returns Statistics about the indexing operation
+ *
+ * @example
+ * ```typescript
+ * const stats = await indexDirectory({
+ *   rootDir: '/path/to/project',
+ *   store,
+ *   onProgress: (msg) => console.log(msg),
+ * });
+ *
+ * console.log(`Indexed ${stats.indexedFiles} files, ${stats.totalChunks} chunks`);
+ * console.log(`Took ${stats.duration}ms`);
+ * ```
  */
 export async function indexDirectory(options: IndexerOptions): Promise<IndexStats> {
   const {
@@ -292,7 +325,24 @@ export async function indexDirectory(options: IndexerOptions): Promise<IndexStat
 }
 
 /**
- * File watcher for live incremental updates
+ * File watcher for live incremental updates.
+ *
+ * Watches the file system for changes and automatically updates the index.
+ * Includes debouncing to avoid excessive re-indexing during rapid file changes.
+ *
+ * @example
+ * ```typescript
+ * const watcher = new FileWatcher({
+ *   rootDir: '/project',
+ *   store,
+ *   onProgress: (msg) => console.log(msg),
+ * });
+ *
+ * watcher.start();
+ *
+ * // Later, when shutting down:
+ * await watcher.stop();
+ * ```
  */
 export class FileWatcher {
   private watcher: chokidar.FSWatcher | null = null;
@@ -303,6 +353,12 @@ export class FileWatcher {
   private onProgress?: (message: string) => void;
   private debounceTimers = new Map<string, NodeJS.Timeout>();
   private debounceMs = 1000;
+
+  /** Track pending file operations for graceful shutdown */
+  private pendingFileOperations = new Set<string>();
+
+  /** Flag indicating watcher is being stopped */
+  private isStopping = false;
 
   constructor(options: IndexerOptions) {
     this.rootDir = options.rootDir;
@@ -375,19 +431,29 @@ export class FileWatcher {
    * Process file change asynchronously (extracted for proper error handling)
    */
   private async processFileChange(filePath: string): Promise<void> {
+    // Don't process if we're stopping
+    if (this.isStopping) return;
+
     const { shouldIndex } = shouldIndexFile(filePath, this.maxFileSize);
     if (!shouldIndex) return;
 
-    // Delete old records
-    await this.store.deleteByFilePath(filePath);
+    // Track this operation
+    this.pendingFileOperations.add(filePath);
 
-    // Index the file
-    const records = await indexFile(filePath, this.store, this.onProgress);
-    if (records.length > 0) {
-      await this.store.upsert(records);
-      this.onProgress?.(
-        `Re-indexed: ${path.basename(filePath)} (${records.length} chunks)`
-      );
+    try {
+      // Delete old records
+      await this.store.deleteByFilePath(filePath);
+
+      // Index the file
+      const records = await indexFile(filePath, this.store, this.onProgress);
+      if (records.length > 0) {
+        await this.store.upsert(records);
+        this.onProgress?.(
+          `Re-indexed: ${path.basename(filePath)} (${records.length} chunks)`
+        );
+      }
+    } finally {
+      this.pendingFileOperations.delete(filePath);
     }
   }
 
@@ -404,27 +470,62 @@ export class FileWatcher {
   }
 
   /**
-   * Stop watching
+   * Stop watching and wait for pending operations.
+   *
+   * @param timeout - Maximum time to wait for pending operations (default: 30000ms)
    */
-  async stop(): Promise<void> {
-    if (this.watcher) {
-      await this.watcher.close();
-      this.watcher = null;
-    }
+  async stop(timeout: number = 30000): Promise<void> {
+    this.isStopping = true;
 
-    // Clear all debounce timers
+    // Clear all debounce timers to prevent new operations
     for (const timer of this.debounceTimers.values()) {
       clearTimeout(timer);
     }
     this.debounceTimers.clear();
 
+    // Wait for pending file operations to complete
+    if (this.pendingFileOperations.size > 0) {
+      this.onProgress?.(`Waiting for ${this.pendingFileOperations.size} pending operations...`);
+
+      const startTime = Date.now();
+      while (this.pendingFileOperations.size > 0 && Date.now() - startTime < timeout) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+
+      if (this.pendingFileOperations.size > 0) {
+        this.onProgress?.(`Timeout: ${this.pendingFileOperations.size} operations still pending`);
+      }
+    }
+
+    // Close the watcher
+    if (this.watcher) {
+      await this.watcher.close();
+      this.watcher = null;
+    }
+
+    this.isStopping = false;
+    this.pendingFileOperations.clear();
     this.onProgress?.('Stopped watching');
   }
 
   /**
-   * Check if watcher is running
+   * Check if watcher is running.
    */
   isRunning(): boolean {
-    return this.watcher !== null;
+    return this.watcher !== null && !this.isStopping;
+  }
+
+  /**
+   * Get the number of pending file operations.
+   */
+  getPendingOperationCount(): number {
+    return this.pendingFileOperations.size;
+  }
+
+  /**
+   * Get the list of files currently being processed.
+   */
+  getPendingFiles(): string[] {
+    return Array.from(this.pendingFileOperations);
   }
 }
