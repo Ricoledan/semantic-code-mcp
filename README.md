@@ -26,7 +26,7 @@ Using local embeddings and vector search, it bridges the gap between text search
 ## Features
 
 - **Semantic search** - Find code by meaning, not just keywords
-- **AST-aware chunking** - Tree-sitter based chunking for better semantic boundaries (+4.3 Recall@5 vs fixed-length)
+- **AST-aware chunking** - Tree-sitter WASM for cross-platform parsing, no native compilation required
 - **Local embeddings** - ONNX Runtime with nomic-embed-code (768 dims, 8K context)
 - **Hybrid search** - Vector similarity + BM25 keyword matching
 - **Cross-encoder reranking** - Higher precision with transformer reranking
@@ -37,15 +37,21 @@ Using local embeddings and vector search, it bridges the gap between text search
 
 ## Installation
 
-### Quick Start (Recommended)
+### Quick Start
 
-For instant startup, install globally first:
+Run directly with npx - no installation required:
+
+```bash
+npx @smallthinkingmachines/semantic-code-mcp
+```
+
+Or install globally for faster startup:
 
 ```bash
 npm install -g @smallthinkingmachines/semantic-code-mcp
 ```
 
-This compiles the native tree-sitter parsers once. Then in your MCP config, use the installed binary:
+Then use in your MCP config:
 
 ```json
 {
@@ -56,16 +62,6 @@ This compiles the native tree-sitter parsers once. Then in your MCP config, use 
   }
 }
 ```
-
-### Alternative: Using npx
-
-You can also use `npx` directly, but the **first run** will be slow as it compiles native modules:
-
-```bash
-npx @smallthinkingmachines/semantic-code-mcp
-```
-
-The MCP server connects immediately (lazy loading), but the first search triggers compilation if not already done.
 
 ### As a Project Dependency
 
@@ -145,7 +141,7 @@ semantic_search({
 
 ```
 semantic_search tool (MCP Server)
-├── Chunker (tree-sitter)     → AST-aware code splitting
+├── Chunker (web-tree-sitter) → AST-aware code splitting (WASM, cross-platform)
 ├── Embedder (ONNX local)     → nomic-embed-code, 768 dims
 ├── Vector DB (LanceDB)       → Serverless, hybrid search
 ├── File Watcher (chokidar)   → Incremental updates
@@ -279,7 +275,8 @@ semantic-code-mcp/
 │   ├── index.ts              # MCP server entry point
 │   ├── chunker/
 │   │   ├── index.ts          # Main chunker logic
-│   │   └── languages.ts      # Tree-sitter language configs
+│   │   ├── languages.ts      # Language configs with WASM paths
+│   │   └── wasm-loader.ts    # WASM grammar loader with caching
 │   ├── embedder/
 │   │   ├── index.ts          # ONNX embedding generation
 │   │   └── model.ts          # Model download & loading
@@ -292,6 +289,9 @@ semantic-code-mcp/
 │   │   └── index.ts          # File watcher + incremental indexing
 │   └── tools/
 │       └── semantic-search.ts # MCP tool definition
+├── grammars/                  # Pre-built WASM parsers
+├── scripts/
+│   └── copy-grammars.js      # Build script for WASM files
 ├── package.json
 ├── tsconfig.json
 └── README.md
