@@ -37,9 +37,6 @@ jobs:
           # macOS ARM64 (Apple Silicon) - most common developer machine
           - os: macos-latest
             name: macOS ARM64
-          # macOS x64 (Intel)
-          - os: macos-15-large
-            name: macOS x64
           # Linux x64
           - os: ubuntu-latest
             name: Linux x64
