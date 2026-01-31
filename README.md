@@ -1,19 +1,27 @@
 # semantic-code-mcp
 
-MCP server for semantic code search using AST-aware chunking and vector embeddings. Works with any AI coding tool that supports MCP (Claude Code, Cursor, Windsurf, Cline, etc.)
+[![npm version](https://img.shields.io/npm/v/@smallthinkingmachines/semantic-code-mcp.svg)](https://www.npmjs.com/package/@smallthinkingmachines/semantic-code-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+MCP server for semantic code search using AST-aware chunking and vector embeddings. Works with any AI coding tool that supports MCP.
+
+[GitHub](https://github.com/smallthinkingmachines/semantic-code-mcp) | [npm](https://www.npmjs.com/package/@smallthinkingmachines/semantic-code-mcp)
 
 ## The Problem
 
-AI coding tools' context windows can only hold ~0.017% of a 3GB codebase at any time. Current search relies on grep/ripgrep, which requires knowing exact function names or text patterns. When users ask conceptual questions like "where is authentication handled?" or "find the payment error handling", grep fails because:
+Traditional search tools like grep, ripgrep, and ag match text patterns exactly. When developers ask conceptual questions like "How is authentication handled?" or "Where do we process payments?", these tools require knowing exact function names or code patterns. This leads to:
 
-- It matches **text**, not **meaning**
-- Returns thousands of false positives
-- Misses relevant code with different naming conventions
-- Consumes 5-10x more tokens reading irrelevant results
+- **Overwhelming results**: Thousands of lines containing search terms, most irrelevant
+- **Naming convention blindness**: "authenticateUser", "login", "validateSession", and "handleAuth" are the same concept—grep doesn't know that
+- **Lost context**: Results show isolated lines without surrounding code structure
+
+AI coding tools inherit these limitations. Claude Code relies on grep/ripgrep for code search—no semantic understanding, just string matching. Aider uses repo maps with graph ranking to select relevant code, but still depends on structural analysis rather than meaning. These approaches work on smaller codebases but struggle at scale, burning tokens on irrelevant results or missing conceptually related code.
 
 ## The Solution
 
-Semantic search finds code by meaning, not text. Using local embeddings and vector search, it can answer questions like "find authentication logic" without knowing that the file is named `IdentityManager.ts`.
+Semantic search understands code by meaning, not just text. It can answer "How is user authentication implemented?" by understanding conceptual relationships—regardless of function names or file locations.
+
+Using local embeddings and vector search, it bridges the gap between text search limitations and LLM context constraints, providing more accurate results for navigating large codebases.
 
 ## Features
 
@@ -37,7 +45,7 @@ yarn add @smallthinkingmachines/semantic-code-mcp
 
 ## Usage with Claude Code
 
-Add to your Claude Code MCP configuration (`~/.claude/claude_desktop_config.json`):
+Add to your Claude Code MCP configuration (`~/.claude.json` or project-level `.mcp.json`):
 
 ```json
 {
@@ -118,6 +126,9 @@ semantic_search tool (MCP Server)
 - Python
 - Go
 - Rust
+- Java
+- C / C++
+- C#
 
 Other languages fall back to line-based chunking.
 
