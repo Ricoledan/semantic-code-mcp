@@ -37,43 +37,25 @@ Using local embeddings and vector search, it bridges the gap between text search
 
 ## Installation
 
-### Quick Start
+### OpenCode
 
-Run directly with npx - no installation required:
-
-```bash
-npx @smallthinkingmachines/semantic-code-mcp
-```
-
-Or install globally for faster startup:
-
-```bash
-npm install -g @smallthinkingmachines/semantic-code-mcp
-```
-
-Then use in your MCP config:
+Add to `~/.config/opencode/opencode.json`:
 
 ```json
 {
-  "mcpServers": {
+  "mcp": {
     "semantic-code": {
-      "command": "semantic-code-mcp"
+      "type": "local",
+      "command": ["npx", "@smallthinkingmachines/semantic-code-mcp"],
+      "enabled": true
     }
   }
 }
 ```
 
-### As a Project Dependency
+### Claude Code
 
-```bash
-npm install @smallthinkingmachines/semantic-code-mcp
-# or
-yarn add @smallthinkingmachines/semantic-code-mcp
-```
-
-## Usage with Claude Code
-
-Add to your Claude Code MCP configuration (`~/.claude.json` or project-level `.mcp.json`):
+Add to `~/.claude.json` or project `.mcp.json`:
 
 ```json
 {
@@ -86,33 +68,38 @@ Add to your Claude Code MCP configuration (`~/.claude.json` or project-level `.m
 }
 ```
 
-The server automatically uses your current working directory. To specify a different directory:
+### VS Code
+
+Add to `.vscode/mcp.json` (workspace) or run `MCP: Add Server` command:
 
 ```json
 {
-  "mcpServers": {
+  "servers": {
     "semantic-code": {
       "command": "npx",
-      "args": ["@smallthinkingmachines/semantic-code-mcp", "/path/to/project"]
+      "args": ["-y", "@smallthinkingmachines/semantic-code-mcp"]
     }
   }
 }
 ```
 
-## Usage with Other MCP Clients
+### Specifying a Directory
 
-The server uses stdio transport. Start it with:
+The server indexes your current working directory by default. To index a specific directory, add it as an argument:
 
 ```bash
-# Uses current directory
-npx @smallthinkingmachines/semantic-code-mcp
-
-# Or specify a directory
-npx @smallthinkingmachines/semantic-code-mcp /path/to/project
-
-# Or use environment variable
-SEMANTIC_CODE_ROOT=/path/to/project npx @smallthinkingmachines/semantic-code-mcp
+# OpenCode: ["npx", "@smallthinkingmachines/semantic-code-mcp", "/path/to/project"]
+# VS Code:  "args": ["-y", "@smallthinkingmachines/semantic-code-mcp", "/path/to/project"]
+# Claude:   "args": ["@smallthinkingmachines/semantic-code-mcp", "/path/to/project"]
 ```
+
+## First Run
+
+On first search, the server will:
+1. **Download models** (~400MB) - embedding and reranking models are cached in `~/.cache/semantic-code-mcp/`
+2. **Index your codebase** - parses and embeds all supported files (progress shown in logs)
+
+Subsequent searches use the cached models and index. The index updates automatically when files change.
 
 ## Tool: semantic_search
 
@@ -169,37 +156,7 @@ Other languages fall back to line-based chunking.
 | `SEMANTIC_CODE_ROOT` | Root directory to index | Current working directory |
 | `SEMANTIC_CODE_INDEX` | Custom index storage location | `.semantic-code/index/` |
 
-### Indexing Options
-
-When using the library programmatically, you can configure indexing behavior:
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `batchSize` | number | 10 | Number of files to process in each batch |
-| `maxFileSize` | number | 1MB | Maximum file size to index (larger files are skipped) |
-| `maxChunksInMemory` | number | 500 | Chunks to accumulate before flushing to database |
-| `ignorePatterns` | string[] | See below | Glob patterns for files/directories to ignore |
-
-#### Memory Management
-
-The `maxChunksInMemory` option controls memory usage during indexing:
-
-- **Default (500)**: ~1.5MB of embedding data in memory at peak
-- **Lower values**: Less memory, more database writes
-- **Higher values**: More memory, fewer database writes
-
-For very large codebases (100K+ files), consider lowering this value:
-
-```typescript
-await indexDirectory({
-  rootDir: '/path/to/monorepo',
-  store,
-  maxChunksInMemory: 200,  // More frequent flushes for large repos
-  batchSize: 5,            // Smaller file batches
-});
-```
-
-#### Default Ignore Patterns
+### Default Ignore Patterns
 
 The following patterns are ignored by default:
 
@@ -295,4 +252,29 @@ semantic-code-mcp/
 ├── package.json
 ├── tsconfig.json
 └── README.md
+```
+
+---
+
+## Appendix
+
+### Nix Users
+
+Due to Nix's PATH isolation, `npx` may not find the binary. Install to a fixed location instead:
+
+```bash
+npm install --prefix ~/.local/share/semantic-code-mcp @smallthinkingmachines/semantic-code-mcp
+```
+
+Then use in your MCP config (replace `YOUR_USERNAME`):
+
+```json
+{
+  "mcpServers": {
+    "semantic-code": {
+      "command": "node",
+      "args": ["/home/YOUR_USERNAME/.local/share/semantic-code-mcp/node_modules/@smallthinkingmachines/semantic-code-mcp/dist/index.js"]
+    }
+  }
+}
 ```
