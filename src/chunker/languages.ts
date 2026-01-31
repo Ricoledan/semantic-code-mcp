@@ -12,11 +12,13 @@ export interface LanguageConfig {
   nameNodeTypes: string[];
   /** Node types for docstrings/comments */
   docstringNodeTypes: string[];
+  /** Path to the WASM grammar file (relative to grammars directory) */
+  wasmPath: string;
 }
 
 export const LANGUAGE_CONFIGS: Record<string, LanguageConfig> = {
   typescript: {
-    extensions: ['.ts', '.tsx'],
+    extensions: ['.ts'],
     chunkNodeTypes: [
       'function_declaration',
       'method_definition',
@@ -30,9 +32,27 @@ export const LANGUAGE_CONFIGS: Record<string, LanguageConfig> = {
     ],
     nameNodeTypes: ['identifier', 'property_identifier'],
     docstringNodeTypes: ['comment'],
+    wasmPath: 'tree-sitter-typescript.wasm',
+  },
+  tsx: {
+    extensions: ['.tsx'],
+    chunkNodeTypes: [
+      'function_declaration',
+      'method_definition',
+      'class_declaration',
+      'interface_declaration',
+      'type_alias_declaration',
+      'enum_declaration',
+      'export_statement',
+      'lexical_declaration',
+      'variable_declaration',
+    ],
+    nameNodeTypes: ['identifier', 'property_identifier'],
+    docstringNodeTypes: ['comment'],
+    wasmPath: 'tree-sitter-tsx.wasm',
   },
   javascript: {
-    extensions: ['.js', '.jsx', '.mjs', '.cjs'],
+    extensions: ['.js', '.mjs', '.cjs'],
     chunkNodeTypes: [
       'function_declaration',
       'method_definition',
@@ -43,6 +63,21 @@ export const LANGUAGE_CONFIGS: Record<string, LanguageConfig> = {
     ],
     nameNodeTypes: ['identifier', 'property_identifier'],
     docstringNodeTypes: ['comment'],
+    wasmPath: 'tree-sitter-javascript.wasm',
+  },
+  jsx: {
+    extensions: ['.jsx'],
+    chunkNodeTypes: [
+      'function_declaration',
+      'method_definition',
+      'class_declaration',
+      'export_statement',
+      'lexical_declaration',
+      'variable_declaration',
+    ],
+    nameNodeTypes: ['identifier', 'property_identifier'],
+    docstringNodeTypes: ['comment'],
+    wasmPath: 'tree-sitter-javascript.wasm',
   },
   python: {
     extensions: ['.py', '.pyw'],
@@ -53,6 +88,7 @@ export const LANGUAGE_CONFIGS: Record<string, LanguageConfig> = {
     ],
     nameNodeTypes: ['identifier'],
     docstringNodeTypes: ['string', 'comment'], // Python uses string literals as docstrings
+    wasmPath: 'tree-sitter-python.wasm',
   },
   go: {
     extensions: ['.go'],
@@ -63,6 +99,7 @@ export const LANGUAGE_CONFIGS: Record<string, LanguageConfig> = {
     ],
     nameNodeTypes: ['identifier', 'field_identifier'],
     docstringNodeTypes: ['comment'],
+    wasmPath: 'tree-sitter-go.wasm',
   },
   rust: {
     extensions: ['.rs'],
@@ -76,6 +113,7 @@ export const LANGUAGE_CONFIGS: Record<string, LanguageConfig> = {
     ],
     nameNodeTypes: ['identifier'],
     docstringNodeTypes: ['line_comment', 'block_comment'],
+    wasmPath: 'tree-sitter-rust.wasm',
   },
   java: {
     extensions: ['.java'],
@@ -89,6 +127,7 @@ export const LANGUAGE_CONFIGS: Record<string, LanguageConfig> = {
     ],
     nameNodeTypes: ['identifier'],
     docstringNodeTypes: ['block_comment', 'line_comment'],
+    wasmPath: 'tree-sitter-java.wasm',
   },
   csharp: {
     extensions: ['.cs'],
@@ -103,6 +142,7 @@ export const LANGUAGE_CONFIGS: Record<string, LanguageConfig> = {
     ],
     nameNodeTypes: ['identifier'],
     docstringNodeTypes: ['comment'],
+    wasmPath: 'tree-sitter-c_sharp.wasm',
   },
   cpp: {
     extensions: ['.cpp', '.cc', '.cxx', '.hpp', '.h', '.hxx'],
@@ -115,6 +155,19 @@ export const LANGUAGE_CONFIGS: Record<string, LanguageConfig> = {
     ],
     nameNodeTypes: ['identifier', 'field_identifier'],
     docstringNodeTypes: ['comment'],
+    wasmPath: 'tree-sitter-cpp.wasm',
+  },
+  c: {
+    extensions: ['.c'],
+    chunkNodeTypes: [
+      'function_definition',
+      'struct_specifier',
+      'enum_specifier',
+      'declaration',
+    ],
+    nameNodeTypes: ['identifier', 'field_identifier'],
+    docstringNodeTypes: ['comment'],
+    wasmPath: 'tree-sitter-c.wasm',
   },
 };
 

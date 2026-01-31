@@ -1,9 +1,9 @@
 /**
- * AST-aware code chunker using tree-sitter.
+ * AST-aware code chunker using web-tree-sitter (WASM).
  *
  * Splits code into semantic units (functions, classes, methods) for better
- * embedding quality. Uses tree-sitter for accurate parsing across multiple
- * languages.
+ * embedding quality. Uses web-tree-sitter for cross-platform parsing across
+ * multiple languages without requiring native module compilation.
  *
  * Features:
  * - Semantic chunking at function/class/method boundaries
@@ -11,17 +11,19 @@
  * - Fallback to line-based chunking for unsupported languages
  * - BOM stripping for cross-platform compatibility
  * - Depth limiting to prevent stack overflow on pathological inputs
+ * - WASM-based parsing for zero-install distribution
  *
  * @module chunker
  */
 
-import Parser from 'tree-sitter';
+import type Parser from 'web-tree-sitter';
 import path from 'path';
 import {
   LANGUAGE_CONFIGS,
   getLanguageByExtension,
   type LanguageConfig,
 } from './languages.js';
+import { createParser } from './wasm-loader.js';
 import { stripBOM } from '../utils/paths.js';
 import { createLogger } from '../utils/logger.js';
 
@@ -56,90 +58,6 @@ export interface CodeChunk {
   language: string;
 }
 
-interface TreeSitterLanguageModule {
-  default?: unknown;
-  Language?: unknown;
-}
-
-// Cache for loaded tree-sitter languages
-const languageCache = new Map<string, unknown>();
-
-/**
- * Load tree-sitter language parser
- */
-async function loadLanguage(lang: string): Promise<unknown> {
-  if (languageCache.has(lang)) {
-    return languageCache.get(lang);
-  }
-
-  let _languageModule: TreeSitterLanguageModule;
-
-  try {
-    let language: unknown;
-
-    switch (lang) {
-      case 'typescript': {
-        const tsModule = await import('tree-sitter-typescript');
-        // ESM wraps in default, tree-sitter-typescript exports { typescript, tsx }
-        const ts = tsModule.default ?? tsModule;
-        languageCache.set('typescript', ts.typescript);
-        languageCache.set('tsx', ts.tsx);
-        return ts.typescript;
-      }
-      case 'tsx': {
-        const tsModule = await import('tree-sitter-typescript');
-        const ts = tsModule.default ?? tsModule;
-        languageCache.set('typescript', ts.typescript);
-        languageCache.set('tsx', ts.tsx);
-        return ts.tsx;
-      }
-      case 'javascript': {
-        const jsModule = await import('tree-sitter-javascript');
-        language = jsModule.default ?? jsModule;
-        break;
-      }
-      case 'python': {
-        const pyModule = await import('tree-sitter-python');
-        language = pyModule.default ?? pyModule;
-        break;
-      }
-      case 'go': {
-        const goModule = await import('tree-sitter-go');
-        language = goModule.default ?? goModule;
-        break;
-      }
-      case 'rust': {
-        const rustModule = await import('tree-sitter-rust');
-        language = rustModule.default ?? rustModule;
-        break;
-      }
-      case 'java': {
-        const javaModule = await import('tree-sitter-java');
-        language = javaModule.default ?? javaModule;
-        break;
-      }
-      case 'csharp': {
-        const csharpModule = await import('tree-sitter-c-sharp');
-        language = csharpModule.default ?? csharpModule;
-        break;
-      }
-      case 'cpp': {
-        const cppModule = await import('tree-sitter-cpp');
-        language = cppModule.default ?? cppModule;
-        break;
-      }
-      default:
-        throw new Error(`Unsupported language: ${lang}`);
-    }
-
-    languageCache.set(lang, language);
-    return language;
-  } catch (error) {
-    throw new Error(
-      `Failed to load tree-sitter language for ${lang}: ${error}`
-    );
-  }
-}
 
 /**
  * Extract the name from an AST node
@@ -342,7 +260,7 @@ export async function chunkCode(
   const cleanedSource = stripBOM(sourceCode);
 
   const ext = path.extname(filePath);
-  let lang = getLanguageByExtension(ext);
+  const lang = getLanguageByExtension(ext);
 
   if (!lang) {
     // Fall back to simple line-based chunking for unsupported languages
@@ -350,23 +268,18 @@ export async function chunkCode(
     return fallbackChunking(cleanedSource, filePath);
   }
 
-  // Handle TSX separately
-  if (ext === '.tsx') {
-    lang = 'tsx';
-  }
-
-  const config = LANGUAGE_CONFIGS[lang === 'tsx' ? 'typescript' : lang];
+  const config = LANGUAGE_CONFIGS[lang];
   if (!config) {
     return fallbackChunking(cleanedSource, filePath);
   }
 
-  try {
-    const language = await loadLanguage(lang);
-    const parser = new Parser();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    parser.setLanguage(language as any);
+  let parser: Parser | null = null;
+  let tree: Parser.Tree | null = null;
 
-    const tree = parser.parse(cleanedSource);
+  try {
+    // Create parser with the language's WASM grammar
+    parser = await createParser(config.wasmPath);
+    tree = parser.parse(cleanedSource);
     const chunks: CodeChunk[] = [];
 
     // Collect all semantic nodes with depth limiting
@@ -384,6 +297,9 @@ export async function chunkCode(
       // Skip if too small
       if (isTooSmall(content)) continue;
 
+      // Normalize language name for output (tsx -> typescript)
+      const outputLang = lang === 'tsx' ? 'typescript' : lang === 'jsx' ? 'javascript' : lang;
+
       // Split if too large
       if (isTooLarge(content)) {
         const subChunks = splitLargeContent(content, startLine);
@@ -400,7 +316,7 @@ export async function chunkCode(
             nodeType: node.type,
             signature: i === 0 ? signature : null,
             docstring: i === 0 ? docstring : null,
-            language: lang === 'tsx' ? 'typescript' : lang,
+            language: outputLang,
           });
         }
       } else {
@@ -414,7 +330,7 @@ export async function chunkCode(
           nodeType: node.type,
           signature,
           docstring,
-          language: lang === 'tsx' ? 'typescript' : lang,
+          language: outputLang,
         });
       }
     }
@@ -435,6 +351,13 @@ export async function chunkCode(
       errorType: error instanceof Error ? error.constructor.name : 'Unknown',
     });
     return fallbackChunking(cleanedSource, filePath);
+  } finally {
+    // IMPORTANT: Free WASM memory by deleting the tree
+    if (tree) {
+      tree.delete();
+    }
+    // Note: Parser instances are lightweight and don't need explicit cleanup
+    // as long as the tree is deleted
   }
 }
 
